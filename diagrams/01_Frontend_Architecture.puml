@@ -1,0 +1,73 @@
+@startuml Frontend_Architecture
+
+title Frontend Architecture - Presentation Layer
+
+package "GUI Components" {
+    component [SwingApp] as SwingApp
+    component [LoginDialog] as LoginDialog
+    component [RegisterDialog] as RegisterDialog
+    component [WorkflowDialog] as WorkflowDialog
+    component [AdminDashboard] as AdminDashboard
+    component [GmailAccountsDialog] as GmailDialog
+    component [UserManagementDialog] as UserMgmtDialog
+}
+
+package "Service Layer (Frontend uses)" {
+    component [DocumentService] as DocService
+    component [WorkflowService] as WorkflowService
+    component [AuthenticationService] as AuthService
+    component [SimpleMultiGmailManager] as GmailManager
+}
+
+' Frontend connections
+SwingApp --> DocService : uses
+SwingApp --> WorkflowService : uses
+SwingApp --> AuthService : uses
+SwingApp --> GmailManager : uses
+
+LoginDialog --> AuthService : uses
+RegisterDialog --> AuthService : uses
+WorkflowDialog --> WorkflowService : uses
+AdminDashboard --> AuthService : uses
+GmailDialog --> GmailManager : uses
+
+note right of SwingApp
+  + buildUI()
+  + refreshTable()
+  + doWorkflowAction()
+  + selectRowById()
+end note
+
+note right of LoginDialog
+  + showDialog()
+  + authenticate()
+end note
+
+note right of RegisterDialog
+  + showDialog()
+  + register()
+end note
+
+note right of WorkflowDialog
+  + showDialog()
+  + executeWorkflow()
+end note
+
+note right of AdminDashboard
+  + showDashboard()
+  + refreshStats()
+end note
+
+note right of GmailDialog
+  + showDialog()
+  + addAccount()
+  + removeAccount()
+end note
+
+note right of UserMgmtDialog
+  + showDialog()
+  + approveUser()
+  + rejectUser()
+end note
+
+@enduml

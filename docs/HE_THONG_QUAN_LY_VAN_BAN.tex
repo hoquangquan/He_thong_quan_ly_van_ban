@@ -1,0 +1,1231 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[vietnamese]{babel}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{enumitem}
+\usepackage{longtable}
+\usepackage{tikz}
+\usetikzlibrary{shapes,arrows,positioning}
+
+\geometry{margin=2.5cm}
+
+% Cấu hình code listing
+\lstset{
+    language=Java,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue}\bfseries,
+    commentstyle=\color{green!60!black},
+    stringstyle=\color{red},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    stepnumber=1,
+    numbersep=5pt,
+    backgroundcolor=\color{gray!10},
+    frame=single,
+    breaklines=true,
+    breakatwhitespace=true,
+    tabsize=2,
+    showstringspaces=false
+}
+
+\title{\textbf{HỆ THỐNG QUẢN LÝ VĂN BẢN ĐẾN VÀ ĐI}\\
+\large Tài liệu Kỹ thuật Chi tiết}
+\author{Hệ thống Document Management}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+\section{TỔNG QUAN HỆ THỐNG}
+
+\subsection{Mục đích và Phạm vi}
+Hệ thống Quản lý Văn bản Đến và Đi là một ứng dụng desktop Java (Swing) được thiết kế để quản lý toàn bộ vòng đời của văn bản trong một tổ chức hành chính. Hệ thống hỗ trợ:
+
+\begin{itemize}
+    \item Quản lý văn bản đến từ email (Gmail IMAP)
+    \item Quản lý văn bản đi (dự thảo, ban hành)
+    \item Quy trình workflow với nhiều vai trò người dùng
+    \item Lưu trữ file trên MongoDB GridFS
+    \item Quản lý phiên bản văn bản
+    \item Audit log cho mọi thao tác
+    \item Xác thực và phân quyền người dùng
+\end{itemize}
+
+\subsection{Kiến trúc Tổng thể}
+Hệ thống được xây dựng theo kiến trúc 3 tầng (3-Tier Architecture):
+
+\begin{enumerate}
+    \item \textbf{Tầng Presentation (GUI)}: Giao diện Swing desktop
+    \item \textbf{Tầng Business Logic (Service)}: Xử lý nghiệp vụ
+    \item \textbf{Tầng Data Access (Repository)}: Truy cập dữ liệu
+\end{enumerate}
+
+\subsection{Công nghệ Sử dụng}
+\begin{itemize}
+    \item \textbf{Language}: Java 17+
+    \item \textbf{GUI Framework}: Java Swing
+    \item \textbf{Database}: PostgreSQL (metadata, users, logs)
+    \item \textbf{File Storage}: MongoDB GridFS
+    \item \textbf{Email}: javax.mail (IMAP)
+    \item \textbf{PDF Viewer}: Apache PDFBox
+    \item \textbf{CLI}: picocli
+    \item \textbf{Connection Pool}: HikariCP
+\end{itemize}
+
+\section{CẤU TRÚC THƯ MỤC VÀ PACKAGE}
+
+\subsection{Cấu trúc Package}
+Hệ thống được tổ chức theo các package chính:
+
+\begin{verbatim}
+com.example.docmgmt/
+├── App.java                    # Entry point, CLI commands
+├── config/                     # Cấu hình hệ thống
+│   ├── Config.java            # Quản lý kết nối DB
+│   └── GmailConfig.java       # Cấu hình Gmail (deprecated)
+├── domain/                     # Domain models
+│   └── Models.java            # Enums và Records
+├── gui/                        # Giao diện người dùng
+│   ├── SwingApp.java          # Main GUI application
+│   ├── LoginDialog.java       # Đăng nhập
+│   ├── PendingEmailsDialog.java  # Quản lý email chờ xác nhận
+│   ├── PDFViewerPanel.java    # Hiển thị PDF
+│   └── ...                    # Các dialog khác
+├── repo/                       # Data Access Layer
+│   ├── DocumentRepository.java
+│   ├── UserRepository.java
+│   ├── GridFsRepository.java
+│   ├── PendingEmailRepository.java
+│   └── ...
+└── service/                    # Business Logic Layer
+    ├── DocumentService.java
+    ├── WorkflowService.java
+    ├── EmailService.java
+    ├── AuthenticationService.java
+    └── ...
+\end{verbatim}
+
+\section{CHI TIẾT CÁC THÀNH PHẦN}
+
+\subsection{Package: config}
+
+\subsubsection{Config.java}
+\textbf{Mục đích}: Quản lý kết nối đến PostgreSQL và MongoDB.
+
+\textbf{Chức năng chính}:
+\begin{itemize}
+    \item \texttt{fromEnv()}: Đọc cấu hình từ biến môi trường
+    \item Quản lý HikariCP DataSource cho PostgreSQL
+    \item Quản lý MongoClient cho MongoDB
+    \item Implement \texttt{AutoCloseable} để tự động đóng kết nối
+\end{itemize}
+
+\textbf{Biến môi trường}:
+\begin{itemize}
+    \item \texttt{PG\_URL}: JDBC URL PostgreSQL (mặc định: \texttt{jdbc:postgresql://localhost:5432/docmgmt})
+    \item \texttt{PG\_USER}: Username PostgreSQL (mặc định: \texttt{postgres})
+    \item \texttt{PG\_PASS}: Password PostgreSQL
+    \item \texttt{MONGO\_URI}: MongoDB connection string (mặc định: \texttt{mongodb://localhost:27017})
+    \item \texttt{MONGO\_DB}: Tên database MongoDB (mặc định: \texttt{docmgmt})
+    \item \texttt{MONGO\_BUCKET}: Tên GridFS bucket (mặc định: \texttt{files})
+\end{itemize}
+
+\textbf{Coupling}: 
+\begin{itemize}
+    \item Phụ thuộc: HikariCP, MongoDB Driver
+    \item Được sử dụng bởi: Tất cả Service và Repository
+\end{itemize}
+
+\subsection{Package: domain}
+
+\subsubsection{Models.java}
+\textbf{Mục đích}: Định nghĩa các domain model, enum và record types.
+
+\textbf{Các Enum}:
+
+\begin{enumerate}
+    \item \textbf{Role} - Vai trò người dùng:
+    \begin{itemize}
+        \item \texttt{QUAN\_TRI}: Quản trị hệ thống (chỉ giám sát, không thực hiện workflow)
+        \item \texttt{VAN\_THU}: Văn thư - Tiếp nhận và đăng ký văn bản
+        \item \texttt{LANH\_DAO\_CAP\_TREN}: Cục trưởng/Phó Cục trưởng
+        \item \texttt{LANH\_DAO\_PHONG}: Lãnh đạo phòng
+        \item \texttt{CHANH\_VAN\_PHONG}: Chánh Văn phòng
+        \item \texttt{CAN\_BO\_CHUYEN\_MON}: Cán bộ chuyên môn
+    \end{itemize}
+    
+    \item \textbf{DocState} - Trạng thái văn bản đến:
+    \begin{itemize}
+        \item \texttt{TIEP\_NHAN}: Tiếp nhận
+        \item \texttt{DANG\_KY}: Đăng ký
+        \item \texttt{CHO\_XEM\_XET}: Chờ xem xét
+        \item \texttt{DA\_PHAN\_CONG}: Đã phân công
+        \item \texttt{DANG\_XU\_LY}: Đang xử lý
+        \item \texttt{CHO\_DUYET}: Chờ duyệt
+        \item \texttt{HOAN\_THANH}: Hoàn thành
+    \end{itemize}
+    
+    \item \textbf{Priority} - Độ ưu tiên:
+    \begin{itemize}
+        \item \texttt{NORMAL}: Thường
+        \item \texttt{URGENT}: Khẩn
+        \item \texttt{EMERGENCY}: Thượng khẩn
+        \item \texttt{FIRE}: Hỏa tốc
+    \end{itemize}
+    
+    \item \textbf{UserStatus} - Trạng thái người dùng:
+    \begin{itemize}
+        \item \texttt{PENDING}: Chờ duyệt
+        \item \texttt{APPROVED}: Đã duyệt
+        \item \texttt{REJECTED}: Từ chối
+    \end{itemize}
+\end{enumerate}
+
+\textbf{Các Record}:
+
+\begin{enumerate}
+    \item \textbf{Document}: Thông tin văn bản
+    \begin{itemize}
+        \item \texttt{id}: ID văn bản
+        \item \texttt{title}: Tiêu đề
+        \item \texttt{createdAt}: Thời gian tạo
+        \item \texttt{latestFileId}: File ID mới nhất (GridFS)
+        \item \texttt{state}: Trạng thái workflow
+        \item \texttt{classification}: Phân loại (VB\_DI, Quyết định, Thông báo, ...)
+        \item \texttt{securityLevel}: Mức độ mật (Thường, Hạn chế, Mật)
+        \item \texttt{docNumber}: Số văn bản
+        \item \texttt{docYear}: Năm văn bản
+        \item \texttt{deadline}: Thời hạn xử lý
+        \item \texttt{assignedTo}: Người được phân công
+        \item \texttt{priority}: Độ ưu tiên
+        \item \texttt{note}: Ghi chú
+    \end{itemize}
+    
+    \item \textbf{DocumentVersion}: Phiên bản văn bản
+    \begin{itemize}
+        \item \texttt{id}: ID phiên bản
+        \item \texttt{documentId}: ID văn bản
+        \item \texttt{fileId}: File ID trong GridFS
+        \item \texttt{versionNo}: Số phiên bản
+        \item \texttt{createdAt}: Thời gian tạo
+    \end{itemize}
+    
+    \item \textbf{AuditLog}: Nhật ký thao tác
+    \begin{itemize}
+        \item \texttt{id}: ID log
+        \item \texttt{documentId}: ID văn bản
+        \item \texttt{action}: Hành động (TIEP\_NHAN, DANG\_KY, ...)
+        \item \texttt{actor}: Người thực hiện
+        \item \texttt{at}: Thời gian
+        \item \texttt{note}: Ghi chú
+    \end{itemize}
+    
+    \item \textbf{User}: Thông tin người dùng
+    \begin{itemize}
+        \item \texttt{id}: ID người dùng
+        \item \texttt{username}: Tên đăng nhập
+        \item \texttt{passwordHash}: Mật khẩu đã hash
+        \item \texttt{role}: Vai trò
+        \item \texttt{position}: Chức vụ
+        \item \texttt{organization}: Đơn vị
+        \item \texttt{status}: Trạng thái (PENDING/APPROVED/REJECTED)
+    \end{itemize}
+\end{enumerate}
+
+\textbf{Coupling}: 
+\begin{itemize}
+    \item Không phụ thuộc class nào khác (pure domain model)
+    \item Được sử dụng bởi: Tất cả Service và Repository
+\end{itemize}
+
+\subsection{Package: repo (Data Access Layer)}
+
+\subsubsection{DocumentRepository.java}
+\textbf{Mục đích}: Truy cập dữ liệu bảng \texttt{documents}, \texttt{document\_versions}, \texttt{audit\_logs}.
+
+\textbf{Các phương thức chính}:
+
+\begin{enumerate}
+    \item \textbf{Migration}:
+    \begin{itemize}
+        \item \texttt{migrate()}: Tạo các bảng nếu chưa có, migration trạng thái cũ
+    \end{itemize}
+    
+    \item \textbf{CRUD Document}:
+    \begin{itemize}
+        \item \texttt{insert(String title, String fileId)}: Tạo văn bản mới
+        \item \texttt{insert(Document doc)}: Tạo văn bản với đầy đủ thông tin
+        \item \texttt{getById(long id)}: Lấy văn bản theo ID
+        \item \texttt{list()}: Lấy danh sách tất cả văn bản
+        \item \texttt{searchByTitle(String keyword)}: Tìm kiếm theo tiêu đề
+        \item \texttt{delete(long id)}: Xóa văn bản
+    \end{itemize}
+    
+    \item \textbf{Workflow}:
+    \begin{itemize}
+        \item \texttt{updateState(long id, DocState state)}: Cập nhật trạng thái
+        \item \texttt{updateAssignedTo(long id, String assignedTo)}: Cập nhật người được phân công
+        \item \texttt{addAudit(long id, String action, String actor, String note)}: Thêm audit log
+        \item \texttt{getAuditLogs(long id)}: Lấy lịch sử thao tác
+    \end{itemize}
+    
+    \item \textbf{Document Versions}:
+    \begin{itemize}
+        \item \texttt{addVersion(long docId, String fileId, int versionNo)}: Thêm phiên bản
+        \item \texttt{nextVersionNo(long docId)}: Lấy số phiên bản tiếp theo
+        \item \texttt{getFileIdByVersion(long docId, int versionNo)}: Lấy file ID theo phiên bản
+        \item \texttt{getAllFileIds(long docId)}: Lấy tất cả file ID của văn bản
+    \end{itemize}
+    
+    \item \textbf{Document Number}:
+    \begin{itemize}
+        \item \texttt{assignIssueNumber(long docId, int number, int year)}: Cấp số văn bản
+        \item \texttt{nextDocNumberForYear(int year)}: Lấy số tiếp theo cho năm
+    \end{itemize}
+    
+    \item \textbf{File Management}:
+    \begin{itemize}
+        \item \texttt{updateLatestFileId(long docId, String fileId)}: Cập nhật file mới nhất
+    \end{itemize}
+\end{enumerate}
+
+\textbf{Coupling}:
+\begin{itemize}
+    \item Phụ thuộc: \texttt{DataSource} (PostgreSQL), \texttt{Models}
+    \item Được sử dụng bởi: \texttt{DocumentService}, \texttt{WorkflowService}, \texttt{PendingEmailService}
+\end{itemize}
+
+\subsubsection{GridFsRepository.java}
+\textbf{Mục đích}: Quản lý file trên MongoDB GridFS.
+
+\textbf{Các phương thức chính}:
+
+\begin{enumerate}
+    \item \textbf{Upload}:
+    \begin{itemize}
+        \item \texttt{upload(Path path, String title)}: Upload file từ đường dẫn
+        \item \texttt{saveFile(String filename, InputStream inputStream)}: Upload từ InputStream
+    \end{itemize}
+    
+    \item \textbf{Download}:
+    \begin{itemize}
+        \item \texttt{download(String hexId, Path outPath)}: Tải file về đường dẫn
+        \item \texttt{downloadToTempFile(String hexId)}: Tải về file tạm
+    \end{itemize}
+    
+    \item \textbf{Read}:
+    \begin{itemize}
+        \item \texttt{readFileAsString(String hexId)}: Đọc file dạng text (UTF-8)
+        \item \texttt{readFileBytes(String hexId)}: Đọc file dạng byte array
+    \end{itemize}
+    
+    \item \textbf{Metadata}:
+    \begin{itemize}
+        \item \texttt{getFilename(String hexId)}: Lấy tên file
+    \end{itemize}
+    
+    \item \textbf{Delete}:
+    \begin{itemize}
+        \item \texttt{delete(String hexId)}: Xóa file khỏi GridFS
+    \end{itemize}
+\end{enumerate}
+
+\textbf{Coupling}:
+\begin{itemize}
+    \item Phụ thuộc: \texttt{MongoClient}, MongoDB GridFS API
+    \item Được sử dụng bởi: \texttt{DocumentService}, \texttt{EmailService}, \texttt{PendingEmailService}
+\end{itemize}
+
+\subsubsection{UserRepository.java}
+\textbf{Mục đích}: Quản lý người dùng trong hệ thống.
+
+\textbf{Các phương thức chính}:
+\begin{itemize}
+    \item \texttt{migrate()}: Tạo bảng \texttt{users}
+    \item \texttt{addUser(...)}: Thêm người dùng mới
+    \item \texttt{getByUsername(String username)}: Lấy người dùng theo username
+    \item \texttt{updatePassword(String username, String hash)}: Cập nhật mật khẩu
+    \item \texttt{approveUser(String username)}: Duyệt người dùng
+    \item \texttt{list()}: Lấy danh sách tất cả người dùng
+    \item \texttt{getRolesByUsername(String username)}: Lấy vai trò của người dùng
+\end{itemize}
+
+\textbf{Coupling}:
+\begin{itemize}
+    \item Phụ thuộc: \texttt{DataSource}, \texttt{Models}
+    \item Được sử dụng bởi: \texttt{AuthenticationService}, \texttt{WorkflowService}
+\end{itemize}
+
+\subsubsection{PendingEmailRepository.java}
+\textbf{Mục đích}: Quản lý email chờ xác nhận.
+
+\textbf{Các phương thức chính}:
+\begin{itemize}
+    \item \texttt{migrate()}: Tạo bảng \texttt{pending\_emails}
+    \item \texttt{add(...)}: Thêm email vào danh sách chờ
+    \item \texttt{listPending()}: Lấy danh sách email chờ xác nhận
+    \item \texttt{getById(long id)}: Lấy email theo ID
+    \item \texttt{approve(long id, long documentId, String reviewedBy)}: Duyệt email
+    \item \texttt{reject(long id, String reviewedBy, String note)}: Từ chối email
+\end{itemize}
+
+\textbf{Record: PendingEmail}:
+\begin{itemize}
+    \item \texttt{id}: ID email
+    \item \texttt{messageId}: Message-ID từ Gmail
+    \item \texttt{subject}: Tiêu đề email
+    \item \texttt{fromEmail}: Người gửi
+    \item \texttt{receivedAt}: Thời gian nhận
+    \item \texttt{emailContent}: Nội dung email
+    \item \texttt{attachmentFileIds}: Mảng file ID attachments (GridFS)
+    \item \texttt{status}: Trạng thái (PENDING/APPROVED/REJECTED)
+    \item \texttt{reviewedBy}: Người duyệt
+    \item \texttt{reviewedAt}: Thời gian duyệt
+    \item \texttt{documentId}: ID document đã tạo (nếu approve)
+    \item \texttt{note}: Ghi chú
+\end{itemize}
+
+\textbf{Coupling}:
+\begin{itemize}
+    \item Phụ thuộc: \texttt{DataSource}
+    \item Được sử dụng bởi: \texttt{EmailService}, \texttt{PendingEmailService}
+\end{itemize}
+
+\subsection{Package: service (Business Logic Layer)}
+
+\subsubsection{DocumentService.java}
+\textbf{Mục đích}: Xử lý nghiệp vụ quản lý văn bản.
+
+\textbf{Các phương thức chính}:
+
+\begin{enumerate}
+    \item \textbf{Tạo văn bản}:
+    \begin{itemize}
+        \item \texttt{createDocument(String title, Path path)}: Tạo văn bản đến từ file
+        \item \texttt{createOutgoingDocument(String title, Path path)}: Tạo văn bản đi
+    \end{itemize}
+    
+    \item \textbf{Quản lý phiên bản}:
+    \begin{itemize}
+        \item \texttt{addVersion(long docId, String title, Path file)}: Thêm phiên bản mới
+        \item \texttt{exportVersion(long docId, int versionNo, Path outPath)}: Xuất phiên bản cụ thể
+    \end{itemize}
+    
+    \item \textbf{Xuất văn bản}:
+    \begin{itemize}
+        \item \texttt{exportDocument(long docId, Path outPath)}: Xuất file mới nhất
+    \end{itemize}
+    
+    \item \textbf{Tìm kiếm}:
+    \begin{itemize}
+        \item \texttt{listDocuments()}: Lấy danh sách tất cả
+        \item \texttt{searchByTitle(String keyword)}: Tìm kiếm theo tiêu đề
+        \item \texttt{getDocumentById(long id)}: Lấy theo ID
+    \end{itemize}
+    
+    \item \textbf{Cấp số văn bản}:
+    \begin{itemize}
+        \item \texttt{autoAssignDocumentNumber(long docId)}: Tự động cấp số cho văn bản đi
+    \end{itemize}
+    
+    \item \textbf{Xóa văn bản}:
+    \begin{itemize}
+        \item \texttt{deleteDocument(long docId)}: Xóa văn bản và tất cả file liên quan
+    \end{itemize}
+    
+    \item \textbf{Audit Log}:
+    \begin{itemize}
+        \item \texttt{getAuditLogs(long docId)}: Lấy lịch sử thao tác
+    \end{itemize}
+\end{enumerate}
+
+\textbf{Coupling}:
+\begin{itemize}
+    \item Phụ thuộc: \texttt{DocumentRepository}, \texttt{GridFsRepository}, \texttt{Config}
+    \item Được sử dụng bởi: \texttt{SwingApp}, \texttt{App} (CLI)
+\end{itemize}
+
+\subsubsection{WorkflowService.java}
+\textbf{Mục đích}: Xử lý quy trình workflow cho văn bản đến và đi.
+
+\textbf{Quy trình Văn bản Đến}:
+
+\begin{enumerate}
+    \item \textbf{Tiếp nhận} (\texttt{tiepNhan}):
+    \begin{itemize}
+        \item Vai trò: \texttt{VAN\_THU}
+        \item Chức năng: Ghi nhận audit log, không đổi trạng thái
+    \end{itemize}
+    
+    \item \textbf{Đăng ký} (\texttt{dangKy}):
+    \begin{itemize}
+        \item Vai trò: \texttt{VAN\_THU}
+        \item Chuyển: \texttt{TIEP\_NHAN} → \texttt{DANG\_KY}
+    \end{itemize}
+    
+    \item \textbf{Trình lãnh đạo} (\texttt{trinhLanhDao}):
+    \begin{itemize}
+        \item Vai trò: \texttt{VAN\_THU}
+        \item Chuyển: \texttt{DANG\_KY} → \texttt{CHO\_XEM\_XET}
+    \end{itemize}
+    
+    \item \textbf{Chỉ đạo xử lý} (\texttt{chiDaoXuLy}):
+    \begin{itemize}
+        \item Vai trò: \texttt{LANH\_DAO\_CAP\_TREN}
+        \item Chuyển: \texttt{CHO\_XEM\_XET} → \texttt{DA\_PHAN\_CONG}
+        \item Phân công đơn vị chủ trì/phối hợp
+    \end{itemize}
+    
+    \item \textbf{Phân công cán bộ} (\texttt{phanCongCanBo}):
+    \begin{itemize}
+        \item Vai trò: \texttt{LANH\_DAO\_PHONG}
+        \item Chuyển: \texttt{DA\_PHAN\_CONG} → \texttt{DANG\_XU\_LY}
+        \item Phân công cho cán bộ cụ thể
+    \end{itemize}
+    
+    \item \textbf{Thực hiện xử lý} (\texttt{thucHienXuLy}):
+    \begin{itemize}
+        \item Vai trò: \texttt{CAN\_BO\_CHUYEN\_MON}
+        \item Chuyển: \texttt{DANG\_XU\_LY} → \texttt{CHO\_DUYET}
+    \end{itemize}
+    
+    \item \textbf{Xét duyệt} (\texttt{xetDuyet}):
+    \begin{itemize}
+        \item Vai trò: \texttt{LANH\_DAO\_PHONG}
+        \item Chuyển: \texttt{CHO\_DUYET} → \texttt{HOAN\_THANH}
+    \end{itemize}
+\end{enumerate}
+
+\textbf{Quy trình Văn bản Đi}:
+
+\begin{enumerate}
+    \item \textbf{Kiểm tra nội dung} (\texttt{REVIEW\_NOI\_DUNG}):
+    \begin{itemize}
+        \item Vai trò: \texttt{VAN\_THU} hoặc \texttt{CAN\_BO\_CHUYEN\_MON}
+    \end{itemize}
+    
+    \item \textbf{Ký nháy} (\texttt{KY\_NHAY}):
+    \begin{itemize}
+        \item Vai trò: \texttt{LANH\_DAO\_PHONG}
+    \end{itemize}
+    
+    \item \textbf{Kiểm tra thể thức} (\texttt{KIEM\_TRA\_THE\_THUC}):
+    \begin{itemize}
+        \item Vai trò: \texttt{VAN\_THU} hoặc \texttt{CHANH\_VAN\_PHONG}
+    \end{itemize}
+    
+    \item \textbf{Ký số} (\texttt{KY\_SO}):
+    \begin{itemize}
+        \item Vai trò: \texttt{LANH\_DAO\_CAP\_TREN}
+        \item Tự động cấp số văn bản khi ban hành
+    \end{itemize}
+    
+    \item \textbf{Ban hành} (\texttt{BAN\_HANH\_VB\_DI}):
+    \begin{itemize}
+        \item Vai trò: \texttt{VAN\_THU} hoặc \texttt{CHANH\_VAN\_PHONG}
+    \end{itemize}
+    
+    \item \textbf{Phát hành} (\texttt{PHAT\_HANH\_VB\_DI}):
+    \begin{itemize}
+        \item Vai trò: \texttt{VAN\_THU}
+    \end{itemize}
+\end{enumerate}
+
+\textbf{Các phương thức kiểm tra quyền}:
+\begin{itemize}
+    \item \texttt{ensureRole(String username, Role required)}: Kiểm tra có đúng vai trò
+    \item \texttt{ensureAnyRole(String username, Role... allowedRoles)}: Kiểm tra có ít nhất một vai trò
+    \item \texttt{ensureOutgoingWorkflowRole(String username, String actionCode)}: Kiểm tra quyền cho văn bản đi
+\end{itemize}
+
+\textbf{Coupling}:
+\begin{itemize}
+    \item Phụ thuộc: \texttt{DocumentRepository}, \texttt{UserRepository}, \texttt{Models}
+    \item Được sử dụng bởi: \texttt{SwingApp}, \texttt{App} (CLI)
+\end{itemize}
+
+\subsubsection{EmailService.java}
+\textbf{Mục đích}: Kết nối Gmail qua IMAP và xử lý email.
+
+\textbf{Các phương thức chính}:
+
+\begin{enumerate}
+    \item \textbf{Fetch Email}:
+    \begin{itemize}
+        \item \texttt{fetchEmailsFromGmail(String email, String password)}: Lấy email từ Gmail
+        \begin{itemize}
+            \item Kết nối IMAP đến \texttt{imap.gmail.com:993}
+            \item Lấy 10 email mới nhất từ INBOX
+            \item Lọc theo từ khóa văn bản
+            \item Lưu vào \texttt{pending\_emails}
+        \end{itemize}
+    \end{itemize}
+    
+    \item \textbf{Xử lý Email}:
+    \begin{itemize}
+        \item \texttt{processEmail(Message message)}: Xử lý từng email
+        \begin{itemize}
+            \item Kiểm tra trùng lặp (Message-ID)
+            \item Lọc theo từ khóa (\texttt{isDocumentEmail})
+            \item Trích xuất nội dung và attachments
+            \item Lưu attachments vào GridFS
+            \item Lưu vào \texttt{pending\_emails}
+        \end{itemize}
+    \end{itemize}
+    
+    \item \textbf{Lọc từ khóa}:
+    \begin{itemize}
+        \item \texttt{isDocumentEmail(String subject, String from)}: Kiểm tra email có phải văn bản
+        \begin{itemize}
+            \item Từ khóa: "văn bản", "công văn", "quyết định", "thông báo", "báo cáo", "nghị quyết", "chỉ thị", "tờ trình", "đề án", "kế hoạch"
+            \item Hỗ trợ cả tiếng Việt có dấu và không dấu
+        \end{itemize}
+    \end{itemize}
+    
+    \item \textbf{Trích xuất nội dung}:
+    \begin{itemize}
+        \item \texttt{extractEmailContent(Message message)}: Lấy nội dung text của email
+        \item \texttt{saveEmailAttachments(Message message)}: Lưu attachments vào GridFS
+        \begin{itemize}
+            \item Giới hạn kích thước: 50MB
+            \item Decode filename (RFC 2047)
+            \item Lưu email body nếu không có attachment
+        \end{itemize}
+    \end{itemize}
+    
+    \item \textbf{Tạo Document từ Email}:
+    \begin{itemize}
+        \item \texttt{createDocumentFromPendingEmail(...)}: Tạo document khi approve email
+        \item File đầu tiên làm \texttt{latest\_file\_id}
+    \end{itemize}
+    
+    \item \textbf{Quản lý Processed Emails}:
+    \begin{itemize}
+        \item \texttt{isEmailAlreadyProcessed(String messageId)}: Kiểm tra email đã xử lý
+        \item \texttt{saveProcessedEmailId(String messageId, long documentId)}: Lưu Message-ID đã xử lý
+        \item \texttt{createProcessedEmailsTable()}: Tạo bảng \texttt{processed\_emails}
+    \end{itemize}
+    
+    \item \textbf{Test Connection}:
+    \begin{itemize}
+        \item \texttt{testConnection(String email, String password)}: Kiểm tra kết nối Gmail
+    \end{itemize}
+\end{enumerate}
+
+\textbf{Coupling}:
+\begin{itemize}
+    \item Phụ thuộc: \texttt{GridFsRepository}, \texttt{PendingEmailRepository}, \texttt{Config}, javax.mail
+    \item Được sử dụng bởi: \texttt{SwingApp}, \texttt{PendingEmailService}, \texttt{AutoEmailService}
+\end{itemize}
+
+\subsubsection{PendingEmailService.java}
+\textbf{Mục đích}: Xử lý email chờ xác nhận và tạo document.
+
+\textbf{Các phương thức chính}:
+
+\begin{enumerate}
+    \item \textbf{Quản lý Pending Emails}:
+    \begin{itemize}
+        \item \texttt{listPending()}: Lấy danh sách email chờ xác nhận
+        \item \texttt{getById(long id)}: Lấy chi tiết email
+    \end{itemize}
+    
+    \item \textbf{Duyệt Email}:
+    \begin{itemize}
+        \item \texttt{approveEmail(...)}: Duyệt email và tạo document
+        \begin{itemize}
+            \item Tạo document với phân loại do người dùng chọn
+            \item File đầu tiên làm \texttt{latest\_file\_id}
+            \item Các file còn lại tạo thành \texttt{document\_versions}
+            \item Cập nhật trạng thái pending email
+            \item Lưu Message-ID vào \texttt{processed\_emails}
+        \end{itemize}
+    \end{itemize}
+    
+    \item \textbf{Từ chối Email}:
+    \begin{itemize}
+        \item \texttt{rejectEmail(...)}: Từ chối email (không tạo document)
+    \end{itemize}
+    
+    \item \textbf{Quản lý Attachments}:
+    \begin{itemize}
+        \item \texttt{readAttachmentContent(String fileId)}: Đọc nội dung attachment
+        \item \texttt{downloadAttachmentToTemp(String fileId)}: Tải attachment về file tạm
+        \item \texttt{getAttachmentFilename(String fileId)}: Lấy tên file
+        \item \texttt{getAttachmentBytes(String fileId)}: Lấy bytes (cho PDF viewer)
+    \end{itemize}
+\end{enumerate}
+
+\textbf{Coupling}:
+\begin{itemize}
+    \item Phụ thuộc: \texttt{PendingEmailRepository}, \texttt{DocumentRepository}, \texttt{EmailService}, \texttt{GridFsRepository}
+    \item Được sử dụng bởi: \texttt{SwingApp}, \texttt{PendingEmailsDialog}
+\end{itemize}
+
+\subsubsection{AuthenticationService.java}
+\textbf{Mục đích}: Xác thực và quản lý người dùng.
+
+\textbf{Các phương thức chính}:
+\begin{itemize}
+    \item \texttt{login(String username, String password)}: Đăng nhập
+    \begin{itemize}
+        \item Kiểm tra username và password
+        \item Chỉ cho đăng nhập khi status = APPROVED
+        \item Lưu thông tin người dùng hiện tại
+    \end{itemize}
+    \item \texttt{logout()}: Đăng xuất
+    \item \texttt{isLoggedIn()}: Kiểm tra đã đăng nhập
+    \item \texttt{getCurrentUser()}: Lấy người dùng hiện tại
+    \item \texttt{hasRole(Role role)}: Kiểm tra có vai trò
+    \item \texttt{registerUser(...)}: Đăng ký người dùng mới
+    \item \texttt{getAllUsers()}: Lấy danh sách người dùng
+    \item \texttt{userExists(String username)}: Kiểm tra username tồn tại
+\end{itemize}
+
+\textbf{Coupling}:
+\begin{itemize}
+    \item Phụ thuộc: \texttt{UserRepository}, \texttt{PasswordUtil}
+    \item Được sử dụng bởi: \texttt{SwingApp}, \texttt{LoginDialog}, \texttt{RegisterDialog}
+\end{itemize}
+
+\subsubsection{AutoEmailService.java}
+\textbf{Mục đích}: Tự động nhận email theo lịch.
+
+\textbf{Các phương thức chính}:
+\begin{itemize}
+    \item \texttt{start()}: Bắt đầu tự động nhận email
+    \begin{itemize}
+        \item Dùng \texttt{Timer} để chạy định kỳ
+        \item Gọi \texttt{EmailService.fetchEmailsFromGmail()} mỗi \texttt{intervalMinutes} phút
+    \end{itemize}
+    \item \texttt{stop()}: Dừng tự động nhận email
+    \item \texttt{isRunning()}: Kiểm tra trạng thái
+\end{itemize}
+
+\textbf{Coupling}:
+\begin{itemize}
+    \item Phụ thuộc: \texttt{EmailService}
+    \item Được sử dụng bởi: Có thể được tích hợp vào \texttt{SwingApp} trong tương lai
+\end{itemize}
+
+\subsection{Package: gui (Presentation Layer)}
+
+\subsubsection{SwingApp.java}
+\textbf{Mục đích}: Giao diện chính của ứng dụng desktop.
+
+\textbf{Cấu trúc}:
+
+\begin{enumerate}
+    \item \textbf{Khởi tạo}:
+    \begin{itemize}
+        \item Constructor: Tạo tất cả service và repository
+        \item \texttt{initGUI()}: Khởi tạo giao diện
+        \item \texttt{show()}: Hiển thị cửa sổ
+    \end{itemize}
+    
+    \item \textbf{Chế độ làm việc}:
+    \begin{itemize}
+        \item \texttt{DocumentMode.INCOMING}: Quản lý văn bản đến
+        \item \texttt{DocumentMode.OUTGOING}: Quản lý văn bản đi
+    \end{itemize}
+    
+    \item \textbf{Các chức năng chính}:
+    \begin{itemize}
+        \item \texttt{reload()}: Tải lại danh sách văn bản
+        \item \texttt{doAddDocument()}: Thêm văn bản mới
+        \item \texttt{doDeleteDocument()}: Xóa văn bản
+        \item \texttt{doWorkflowAction(String action)}: Thực hiện bước workflow
+        \item \texttt{doOutgoingWorkflowAction(...)}: Thực hiện workflow văn bản đi
+        \item \texttt{showDocumentDetails(long docId)}: Hiển thị chi tiết văn bản
+        \begin{itemize}
+            \item Tab "Thông tin": Thông tin cơ bản
+            \item Tab "Nội dung": PDF viewer hoặc text viewer
+            \item Tab "Lịch sử": Audit logs
+            \item Nút "Mở file": Mở bằng ứng dụng mặc định
+            \item Nút "Xuất file": Tải về
+        \end{itemize}
+        \item \texttt{doEmail()}: Nhận email từ Gmail
+        \item \texttt{showPendingEmails()}: Hiển thị email chờ xác nhận
+        \item \texttt{showWorkflowMenu(...)}: Menu workflow theo vai trò
+    \end{itemize}
+    
+    \item \textbf{Quyền truy cập}:
+    \begin{itemize}
+        \item Menu workflow chỉ hiển thị các bước mà người dùng có quyền
+        \item Kiểm tra vai trò trước khi thực hiện hành động
+    \end{itemize}
+\end{enumerate}
+
+\textbf{Coupling}:
+\begin{itemize}
+    \item Phụ thuộc: Tất cả Service (DocumentService, WorkflowService, AuthenticationService, EmailService, PendingEmailService), GridFsRepository
+    \item Sử dụng: Java Swing, PDFViewerPanel
+\end{itemize}
+
+\subsubsection{PendingEmailsDialog.java}
+\textbf{Mục đích}: Dialog quản lý email chờ xác nhận.
+
+\textbf{Chức năng}:
+\begin{itemize}
+    \item Hiển thị danh sách email chờ xác nhận
+    \item Xem nội dung email và attachments
+    \item Xem PDF trong ứng dụng
+    \item Mở file bằng ứng dụng mặc định
+    \item Duyệt/Từ chối email với phân loại do người dùng chọn
+\end{itemize}
+
+\textbf{Coupling}:
+\begin{itemize}
+    \item Phụ thuộc: \texttt{PendingEmailService}, \texttt{PDFViewerPanel}
+\end{itemize}
+
+\subsubsection{PDFViewerPanel.java}
+\textbf{Mục đích}: Hiển thị PDF trong ứng dụng.
+
+\textbf{Chức năng}:
+\begin{itemize}
+    \item \texttt{loadPDF(byte[] pdfData)}: Load PDF single-page mode
+    \item \texttt{loadPDFContinuous(byte[] pdfData)}: Load PDF continuous scroll mode
+    \item Render PDF với DPI tự động điều chỉnh (200 → 150 → 120 → 100 → 96 → 72)
+    \item Xử lý OutOfMemoryError bằng cách giảm DPI
+    \item Nút chuyển trang (Trước/Sau)
+\end{itemize}
+
+\textbf{Coupling}:
+\begin{itemize}
+    \item Phụ thuộc: Apache PDFBox
+    \item Được sử dụng bởi: \texttt{SwingApp}, \texttt{PendingEmailsDialog}
+\end{itemize}
+
+\subsubsection{LoginDialog.java}
+\textbf{Mục đích}: Dialog đăng nhập.
+
+\textbf{Chức năng}:
+\begin{itemize}
+    \item Nhập username và password
+    \item Gọi \texttt{AuthenticationService.login()}
+    \item Hiển thị lỗi nếu đăng nhập thất bại
+    \item Link đăng ký người dùng mới
+\end{itemize}
+
+\textbf{Coupling}:
+\begin{itemize}
+    \item Phụ thuộc: \texttt{AuthenticationService}
+\end{itemize}
+
+\section{QUY TRÌNH QUẢN LÝ VĂN BẢN}
+
+\subsection{Quy trình Văn bản Đến}
+
+\begin{enumerate}
+    \item \textbf{Nhận Email từ Gmail}:
+    \begin{itemize}
+        \item Người dùng nhấn "Nhận từ Email"
+        \item \texttt{EmailService.fetchEmailsFromGmail()} kết nối Gmail IMAP
+        \item Lọc email có từ khóa văn bản
+        \item Lưu attachments vào GridFS
+        \item Lưu email vào \texttt{pending\_emails} với status = PENDING
+    \end{itemize}
+    
+    \item \textbf{Xác nhận Email}:
+    \begin{itemize}
+        \item Người dùng mở "Email chờ xác nhận"
+        \item Xem nội dung và attachments
+        \item Chọn phân loại, mức độ mật, độ ưu tiên
+        \item Nhấn "Xác nhận"
+        \item \texttt{PendingEmailService.approveEmail()} tạo document
+        \begin{itemize}
+            \item File đầu tiên → \texttt{latest\_file\_id}
+            \item Các file còn lại → \texttt{document\_versions}
+            \item Cập nhật pending email status = APPROVED
+            \item Lưu Message-ID vào \texttt{processed\_emails}
+        \end{itemize}
+    \end{itemize}
+    
+    \item \textbf{Workflow Văn bản Đến}:
+    \begin{enumerate}
+        \item Tiếp nhận (VAN\_THU) → Ghi audit log
+        \item Đăng ký (VAN\_THU) → TIEP\_NHAN → DANG\_KY
+        \item Trình lãnh đạo (VAN\_THU) → DANG\_KY → CHO\_XEM\_XET
+        \item Chỉ đạo xử lý (LANH\_DAO\_CAP\_TREN) → CHO\_XEM\_XET → DA\_PHAN\_CONG
+        \item Phân công cán bộ (LANH\_DAO\_PHONG) → DA\_PHAN\_CONG → DANG\_XU\_LY
+        \item Thực hiện xử lý (CAN\_BO\_CHUYEN\_MON) → DANG\_XU\_LY → CHO\_DUYET
+        \item Xét duyệt (LANH\_DAO\_PHONG) → CHO\_DUYET → HOAN\_THANH
+    \end{enumerate}
+\end{enumerate}
+
+\subsection{Quy trình Văn bản Đi}
+
+\begin{enumerate}
+    \item \textbf{Tạo Văn bản Đi}:
+    \begin{itemize}
+        \item Người dùng chọn "Quản lý văn bản đi"
+        \item Nhấn "Thêm văn bản"
+        \item Chọn file và nhập tiêu đề
+        \item \texttt{DocumentService.createOutgoingDocument()} tạo document với classification = "VB\_DI"
+    \end{itemize}
+    
+    \item \textbf{Workflow Văn bản Đi}:
+    \begin{enumerate}
+        \item Kiểm tra nội dung (VAN\_THU hoặc CAN\_BO\_CHUYEN\_MON)
+        \item Ký nháy (LANH\_DAO\_PHONG)
+        \item Kiểm tra thể thức (VAN\_THU hoặc CHANH\_VAN\_PHONG)
+        \item Ký số (LANH\_DAO\_CAP\_TREN) → Tự động cấp số văn bản
+        \item Ban hành (VAN\_THU hoặc CHANH\_VAN\_PHONG)
+        \item Phát hành (VAN\_THU)
+    \end{enumerate}
+\end{enumerate}
+
+\section{MỐI LIÊN HỆ GIỮA CÁC THÀNH PHẦN}
+
+\subsection{Sơ đồ Dependency}
+
+\begin{tikzpicture}[node distance=2cm, auto]
+    % Nodes
+    \node [rectangle, draw, fill=blue!20] (app) {App.java\\Entry Point};
+    \node [rectangle, draw, fill=green!20, below of=app] (swing) {SwingApp\\Main GUI};
+    \node [rectangle, draw, fill=yellow!20, below left of=swing, xshift=-2cm] (config) {Config\\Database Config};
+    \node [rectangle, draw, fill=orange!20, below right of=swing, xshift=2cm] (models) {Models\\Domain Models};
+    
+    % Services
+    \node [rectangle, draw, fill=cyan!20, below of=swing, yshift=-1cm] (docSvc) {DocumentService};
+    \node [rectangle, draw, fill=cyan!20, right of=docSvc, xshift=2cm] (wfSvc) {WorkflowService};
+    \node [rectangle, draw, fill=cyan!20, left of=docSvc, xshift=-2cm] (authSvc) {AuthenticationService};
+    \node [rectangle, draw, fill=cyan!20, below of=docSvc, yshift=-0.5cm] (emailSvc) {EmailService};
+    \node [rectangle, draw, fill=cyan!20, right of=emailSvc, xshift=2cm] (pendingSvc) {PendingEmailService};
+    
+    % Repositories
+    \node [rectangle, draw, fill=red!20, below of=docSvc, yshift=-2cm] (docRepo) {DocumentRepository};
+    \node [rectangle, draw, fill=red!20, right of=docRepo, xshift=2cm] (userRepo) {UserRepository};
+    \node [rectangle, draw, fill=red!20, left of=docRepo, xshift=-2cm] (gridRepo) {GridFsRepository};
+    \node [rectangle, draw, fill=red!20, below of=emailSvc, yshift=-2cm] (pendingRepo) {PendingEmailRepository};
+    
+    % Arrows
+    \draw [->] (app) -- (swing);
+    \draw [->] (swing) -- (docSvc);
+    \draw [->] (swing) -- (wfSvc);
+    \draw [->] (swing) -- (authSvc);
+    \draw [->] (swing) -- (emailSvc);
+    \draw [->] (swing) -- (pendingSvc);
+    \draw [->] (docSvc) -- (docRepo);
+    \draw [->] (docSvc) -- (gridRepo);
+    \draw [->] (wfSvc) -- (docRepo);
+    \draw [->] (wfSvc) -- (userRepo);
+    \draw [->] (authSvc) -- (userRepo);
+    \draw [->] (emailSvc) -- (gridRepo);
+    \draw [->] (emailSvc) -- (pendingRepo);
+    \draw [->] (pendingSvc) -- (pendingRepo);
+    \draw [->] (pendingSvc) -- (docRepo);
+    \draw [->] (pendingSvc) -- (emailSvc);
+    \draw [->] (pendingSvc) -- (gridRepo);
+    \draw [->] (docSvc) -- (config);
+    \draw [->] (emailSvc) -- (config);
+    \draw [->] (docRepo) -- (config);
+    \draw [->] (userRepo) -- (config);
+    \draw [->] (gridRepo) -- (config);
+    \draw [->] (pendingRepo) -- (config);
+    \draw [->] (docSvc) -- (models);
+    \draw [->] (wfSvc) -- (models);
+    \draw [->] (authSvc) -- (models);
+\end{tikzpicture}
+
+\subsection{Luồng Dữ liệu Chính}
+
+\subsubsection{Luồng Nhận Email và Tạo Văn bản}
+\begin{enumerate}
+    \item \texttt{SwingApp.doEmail()} → \texttt{EmailService.fetchEmailsFromGmail()}
+    \item \texttt{EmailService.processEmail()}:
+    \begin{itemize}
+        \item Kiểm tra trùng lặp (\texttt{isEmailAlreadyProcessed})
+        \item Lọc từ khóa (\texttt{isDocumentEmail})
+        \item Trích xuất nội dung (\texttt{extractEmailContent})
+        \item Lưu attachments (\texttt{saveEmailAttachments}) → \texttt{GridFsRepository}
+        \item Lưu vào \texttt{PendingEmailRepository}
+    \end{itemize}
+    \item Người dùng xác nhận trong \texttt{PendingEmailsDialog}
+    \item \texttt{PendingEmailService.approveEmail()}:
+    \begin{itemize}
+        \item \texttt{EmailService.createDocumentFromPendingEmail()} → Tạo Document object
+        \item \texttt{DocumentRepository.insert()} → Lưu document
+        \item Tạo \texttt{document\_versions} cho các attachments còn lại
+        \item \texttt{PendingEmailRepository.approve()} → Cập nhật status
+        \item \texttt{EmailService.saveProcessedEmailId()} → Lưu Message-ID
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Luồng Workflow Văn bản Đến}
+\begin{enumerate}
+    \item Người dùng chọn văn bản và bước workflow trong \texttt{SwingApp}
+    \item \texttt{SwingApp.doWorkflowAction()} → \texttt{WorkflowService}
+    \item \texttt{WorkflowService} kiểm tra:
+    \begin{itemize}
+        \item Trạng thái hiện tại hợp lệ
+        \item Vai trò người dùng có quyền (\texttt{ensureRole})
+    \end{itemize}
+    \item \texttt{DocumentRepository.updateState()} → Cập nhật trạng thái
+    \item \texttt{DocumentRepository.addAudit()} → Ghi audit log
+    \item \texttt{SwingApp.reload()} → Tải lại danh sách
+\end{enumerate}
+
+\subsubsection{Luồng Tạo và Quản lý Văn bản}
+\begin{enumerate}
+    \item \texttt{SwingApp.doAddDocument()} → \texttt{DocumentService.createDocument()} hoặc \texttt{createOutgoingDocument()}
+    \item \texttt{GridFsRepository.upload()} → Upload file lên GridFS
+    \item \texttt{DocumentRepository.insert()} → Lưu metadata vào PostgreSQL
+    \item Khi xem chi tiết: \texttt{SwingApp.showDocumentDetails()}
+    \begin{itemize}
+        \item \texttt{DocumentRepository.getById()} → Lấy thông tin
+        \item \texttt{GridFsRepository.readFileBytes()} → Đọc file
+        \item \texttt{PDFViewerPanel.loadPDF()} → Hiển thị PDF
+    \end{itemize}
+    \item Khi xuất: \texttt{DocumentService.exportDocument()}
+    \begin{itemize}
+        \item \texttt{DocumentRepository.getById()} → Lấy file ID
+        \item \texttt{GridFsRepository.download()} → Tải file về
+    \end{itemize}
+\end{enumerate}
+
+\section{COUPLING VÀ DEPENDENCIES}
+
+\subsection{Các Loại Coupling trong Hệ thống}
+
+\subsubsection{1. Constructor Dependency Injection}
+Hầu hết các Service và Repository sử dụng constructor injection để nhận dependencies:
+
+\begin{lstlisting}
+// Ví dụ: DocumentService
+public DocumentService(Config config) {
+    this.docRepo = new DocumentRepository(config.dataSource);
+    this.fsRepo = new GridFsRepository(config.mongoClient, ...);
+}
+
+// Ví dụ: WorkflowService
+public WorkflowService(DocumentRepository repo, UserRepository userRepo) {
+    this.repo = repo;
+    this.userRepo = userRepo;
+}
+\end{lstlisting}
+
+\textbf{Ưu điểm}:
+\begin{itemize}
+    \item Dependencies rõ ràng
+    \item Dễ test (có thể mock dependencies)
+    \item Tuân thủ Dependency Inversion Principle
+\end{itemize}
+
+\subsubsection{2. Service Chain Coupling}
+Một số service phụ thuộc service khác:
+
+\begin{itemize}
+    \item \texttt{PendingEmailService} → \texttt{EmailService}
+    \begin{itemize}
+        \item Dùng để tạo document từ pending email
+        \item Dùng để lưu Message-ID đã xử lý
+    \end{itemize}
+    \item \texttt{AutoEmailService} → \texttt{EmailService}
+    \begin{itemize}
+        \item Gọi \texttt{fetchEmailsFromGmail()} định kỳ
+    \end{itemize}
+\end{itemize}
+
+\subsubsection{3. Repository Pattern Coupling}
+Tất cả Service phụ thuộc Repository để truy cập dữ liệu:
+
+\begin{itemize}
+    \item \texttt{DocumentService} → \texttt{DocumentRepository}, \texttt{GridFsRepository}
+    \item \texttt{WorkflowService} → \texttt{DocumentRepository}, \texttt{UserRepository}
+    \item \texttt{EmailService} → \texttt{GridFsRepository}, \texttt{PendingEmailRepository}
+    \item \texttt{PendingEmailService} → \texttt{PendingEmailRepository}, \texttt{DocumentRepository}, \texttt{GridFsRepository}
+    \item \texttt{AuthenticationService} → \texttt{UserRepository}
+\end{itemize}
+
+\subsubsection{4. Config Coupling}
+Tất cả Repository và một số Service phụ thuộc \texttt{Config}:
+
+\begin{itemize}
+    \item \texttt{Config} cung cấp: \texttt{DataSource}, \texttt{MongoClient}, database names
+    \item Được tạo một lần và truyền vào các component
+\end{itemize}
+
+\subsubsection{5. GUI Coupling}
+Các Dialog phụ thuộc Service:
+
+\begin{itemize}
+    \item \texttt{LoginDialog} → \texttt{AuthenticationService}
+    \item \texttt{PendingEmailsDialog} → \texttt{PendingEmailService}
+    \item \texttt{EmailConfigDialog} → \texttt{EmailService}
+    \item \texttt{SwingApp} → Tất cả Service
+\end{itemize}
+
+\subsection{Độ Coupling Cao}
+
+\textbf{SwingApp.java} có coupling cao nhất:
+\begin{itemize}
+    \item Phụ thuộc: 6 Service + 1 Repository
+    \item Tạo trực tiếp nhiều dependencies trong constructor
+    \item Có thể cải thiện bằng Dependency Injection Container
+\end{itemize}
+
+\subsection{Độ Coupling Thấp}
+
+\textbf{Models.java}:
+\begin{itemize}
+    \item Không phụ thuộc class nào khác
+    \item Pure domain model
+    \item Được sử dụng bởi tất cả component khác
+\end{itemize}
+
+\section{KIẾN TRÚC DATABASE}
+
+\subsection{PostgreSQL Tables}
+
+\subsubsection{documents}
+Lưu metadata văn bản:
+\begin{itemize}
+    \item \texttt{id}: BIGSERIAL PRIMARY KEY
+    \item \texttt{title}: TEXT NOT NULL
+    \item \texttt{created\_at}: TIMESTAMPTZ DEFAULT NOW()
+    \item \texttt{latest\_file\_id}: TEXT (GridFS file ID)
+    \item \texttt{state}: TEXT DEFAULT 'TIEP\_NHAN'
+    \item \texttt{classification}: TEXT (VB\_DI, Quyết định, Thông báo, ...)
+    \item \texttt{security\_level}: TEXT (Thường, Hạn chế, Mật)
+    \item \texttt{doc\_number}: INT (Số văn bản)
+    \item \texttt{doc\_year}: INT (Năm văn bản)
+    \item \texttt{deadline}: TIMESTAMPTZ
+    \item \texttt{assigned\_to}: TEXT
+    \item \texttt{priority}: TEXT DEFAULT 'NORMAL'
+    \item \texttt{note}: TEXT
+\end{itemize}
+
+\subsubsection{document\_versions}
+Lưu lịch sử phiên bản:
+\begin{itemize}
+    \item \texttt{id}: BIGSERIAL PRIMARY KEY
+    \item \texttt{document\_id}: BIGINT REFERENCES documents(id) ON DELETE CASCADE
+    \item \texttt{file\_id}: TEXT NOT NULL (GridFS file ID)
+    \item \texttt{version\_no}: INT NOT NULL
+    \item \texttt{created\_at}: TIMESTAMPTZ DEFAULT NOW()
+\end{itemize}
+
+\subsubsection{audit\_logs}
+Lưu lịch sử thao tác:
+\begin{itemize}
+    \item \texttt{id}: BIGSERIAL PRIMARY KEY
+    \item \texttt{document\_id}: BIGINT REFERENCES documents(id) ON DELETE CASCADE
+    \item \texttt{action}: TEXT NOT NULL (TIEP\_NHAN, DANG\_KY, ...)
+    \item \texttt{actor}: TEXT NOT NULL (username)
+    \item \texttt{at}: TIMESTAMPTZ DEFAULT NOW()
+    \item \texttt{note}: TEXT
+\end{itemize}
+
+\subsubsection{users}
+Lưu thông tin người dùng:
+\begin{itemize}
+    \item \texttt{id}: BIGSERIAL PRIMARY KEY
+    \item \texttt{username}: VARCHAR UNIQUE NOT NULL
+    \item \texttt{password\_hash}: VARCHAR NOT NULL
+    \item \texttt{role}: VARCHAR NOT NULL
+    \item \texttt{position}: TEXT
+    \item \texttt{organization}: TEXT
+    \item \texttt{status}: VARCHAR DEFAULT 'PENDING'
+    \item \texttt{created\_at}: TIMESTAMPTZ DEFAULT NOW()
+\end{itemize}
+
+\subsubsection{pending\_emails}
+Lưu email chờ xác nhận:
+\begin{itemize}
+    \item \texttt{id}: BIGSERIAL PRIMARY KEY
+    \item \texttt{message\_id}: VARCHAR UNIQUE NOT NULL
+    \item \texttt{subject}: TEXT
+    \item \texttt{from\_email}: VARCHAR
+    \item \texttt{received\_at}: TIMESTAMPTZ DEFAULT NOW()
+    \item \texttt{email\_content}: TEXT
+    \item \texttt{attachment\_file\_ids}: TEXT[] (Array of GridFS file IDs)
+    \item \texttt{status}: VARCHAR DEFAULT 'PENDING'
+    \item \texttt{reviewed\_by}: VARCHAR
+    \item \texttt{reviewed\_at}: TIMESTAMPTZ
+    \item \texttt{document\_id}: BIGINT REFERENCES documents(id)
+    \item \texttt{note}: TEXT
+\end{itemize}
+
+\subsubsection{processed\_emails}
+Lưu Message-ID đã xử lý để tránh trùng lặp:
+\begin{itemize}
+    \item \texttt{id}: BIGSERIAL PRIMARY KEY
+    \item \texttt{message\_id}: VARCHAR UNIQUE NOT NULL
+    \item \texttt{document\_id}: BIGINT NOT NULL REFERENCES documents(id) ON DELETE CASCADE
+    \item \texttt{processed\_at}: TIMESTAMP DEFAULT NOW()
+    \item \texttt{created\_at}: TIMESTAMP DEFAULT NOW()
+\end{itemize}
+
+\subsection{MongoDB GridFS}
+
+\textbf{Bucket}: \texttt{files}
+
+\textbf{Cấu trúc}:
+\begin{itemize}
+    \item File được lưu với ObjectId làm identifier
+    \item Metadata: filename, uploadDate, length, contentType
+    \item File ID (hex string) được lưu trong PostgreSQL
+\end{itemize}
+
+\section{CLI COMMANDS (App.java)}
+
+\subsection{Các Lệnh Quản lý Văn bản}
+\begin{itemize}
+    \item \texttt{--add <file> --title <title>}: Thêm văn bản
+    \item \texttt{--list}: Liệt kê văn bản
+    \item \texttt{--search <keyword>}: Tìm kiếm
+    \item \texttt{--export <docId>:<path>}: Xuất văn bản
+    \item \texttt{--add-version <docId>:<path>}: Thêm phiên bản
+    \item \texttt{--export-version <docId>:<versionNo>:<path>}: Xuất phiên bản
+\end{itemize}
+
+\subsection{Các Lệnh Workflow}
+\begin{itemize}
+    \item \texttt{--submit <docId>:<actor>:<note>}: Đăng ký
+    \item \texttt{--classify <docId>:<actor>:<note>}: Chỉ đạo xử lý
+    \item \texttt{--approve <docId>:<actor>:<note>}: Xét duyệt
+    \item \texttt{--issue <docId>:<actor>:<note>}: Thực hiện xử lý
+    \item \texttt{--archive <docId>:<actor>:<note>}: Xét duyệt
+\end{itemize}
+
+\subsection{Các Lệnh Quản lý Người dùng}
+\begin{itemize}
+    \item \texttt{--add-user <username>:<password>:<role>}: Thêm người dùng
+    \item \texttt{--set-password <username>:<password>}: Đặt lại mật khẩu
+    \item \texttt{--list-users}: Liệt kê người dùng
+    \item \texttt{--approve-user <username>}: Duyệt người dùng
+\end{itemize}
+
+\subsection{Các Lệnh Khác}
+\begin{itemize}
+    \item \texttt{--gui}: Chạy giao diện desktop
+    \item \texttt{--reset-db}: Reset database (xóa và tạo lại tables)
+\end{itemize}
+
+\section{KẾT LUẬN}
+
+Hệ thống Quản lý Văn bản Đến và Đi được thiết kế theo kiến trúc 3 tầng rõ ràng với sự tách biệt giữa Presentation, Business Logic và Data Access. Hệ thống sử dụng:
+
+\begin{itemize}
+    \item \textbf{Repository Pattern}: Tách biệt logic truy cập dữ liệu
+    \item \textbf{Service Layer}: Xử lý nghiệp vụ độc lập với database
+    \item \textbf{Domain Models}: Định nghĩa rõ ràng các entity và enum
+    \item \textbf{Dependency Injection}: Qua constructor để giảm coupling
+    \item \textbf{Workflow Engine}: Quản lý quy trình với kiểm tra vai trò
+    \item \textbf{Email Integration}: Tự động nhận và xử lý email từ Gmail
+\end{itemize}
+
+Hệ thống có thể mở rộng và bảo trì dễ dàng nhờ kiến trúc rõ ràng và tách biệt các thành phần.
+
+\end{document}
+
